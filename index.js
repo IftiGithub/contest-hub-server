@@ -58,11 +58,15 @@ async function run() {
     // ===== GET USER BY EMAIL =====
     app.get("/users/:email", async (req, res) => {
       const email = req.params.email;
-
       const user = await usersCollection.findOne({ email });
 
-      res.send(user);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" }); // Return valid JSON
+      }
+
+      res.json(user);
     });
+
 
 
   } finally {
