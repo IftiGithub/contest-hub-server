@@ -68,17 +68,31 @@ async function run() {
     });
 
     // UPDATE USER PROFILE
+    // ===== UPDATE USER PROFILE =====
     app.put("/users/:email", async (req, res) => {
-      const email = req.params.email;
-      const updatedData = req.body;
+      try {
+        const email = req.params.email;
+        const updatedData = req.body;
 
-      const result = await usersCollection.updateOne(
-        { email },
-        { $set: updatedData }
-      );
+        const filter = { email };
+        const updateDoc = {
+          $set: {
+            name: updatedData.name,
+            photoURL: updatedData.photoURL,
+            bio: updatedData.bio || "",
+            updatedAt: new Date(),
+          },
+        };
 
-      res.send(result);
+        const result = await usersCollection.updateOne(filter, updateDoc);
+
+        res.send(result);
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Failed to update user" });
+      }
     });
+
 
 
 
