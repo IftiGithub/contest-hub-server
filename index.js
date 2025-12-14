@@ -92,6 +92,42 @@ async function run() {
         res.status(500).send({ message: "Failed to update user" });
       }
     });
+    // GET /participated-contests/:email
+    app.get("/participated-contests/:email", async (req, res) => {
+      const email = req.params.email;
+
+      try {
+        // Fetch contests where this user has joined
+        const contests = await client
+          .db("ContestHub-db")
+          .collection("Contests")
+          .find({ participants: email }) // assuming participants is an array of emails
+          .toArray();
+
+        res.send(contests);
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Failed to fetch participated contests" });
+      }
+    });
+    // GET /winning-contests/:email
+    app.get("/winning-contests/:email", async (req, res) => {
+      const email = req.params.email;
+
+      try {
+        // Fetch contests where this user is declared winner
+        const contests = await client
+          .db("ContestHub-db")
+          .collection("Contests")
+          .find({ winnerEmail: email }) // assuming winnerEmail field exists
+          .toArray();
+
+        res.send(contests);
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Failed to fetch winning contests" });
+      }
+    });
 
 
 
