@@ -67,6 +67,20 @@ async function run() {
       res.json(user);
     });
 
+    // UPDATE USER PROFILE
+    app.put("/users/:email", async (req, res) => {
+      const email = req.params.email;
+      const updatedData = req.body;
+
+      const result = await usersCollection.updateOne(
+        { email },
+        { $set: updatedData }
+      );
+
+      res.send(result);
+    });
+
+
 
 
   } finally {
