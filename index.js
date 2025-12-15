@@ -1,3 +1,4 @@
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
@@ -5,7 +6,6 @@ require("dotenv").config();
 const app = express();
 const port = process.env.PORT || 3000;
 
-const { MongoClient, ServerApiVersion } = require("mongodb");
 
 // ===== MIDDLEWARE =====
 app.use(cors());
@@ -30,6 +30,10 @@ async function run() {
     const usersCollection = client
       .db("ContestHub-db")
       .collection("Users");
+
+    const contestsCollection = client
+      .db("ContestHub-db")
+      .collection("Contests");
 
     // ===== CREATE USER =====
     app.post("/users", async (req, res) => {
@@ -128,6 +132,41 @@ async function run() {
         res.status(500).send({ message: "Failed to fetch winning contests" });
       }
     });
+    // ===== CREATE CONTEST =====
+    app.post("/contests", async (req, res) => {
+      try {
+        const contest = req.body;
+
+        const newContest = {
+          title: contest.title,
+          image: contest.image,
+          description: contest.description,
+          taskInstruction: contest.taskInstruction,
+          contestType: contest.contestType,
+          price: contest.price,
+          prizeMoney: contest.prizeMoney,
+          deadline: new Date(contest.deadline),
+
+          creatorEmail: contest.creatorEmail,
+          creatorName: contest.creatorName,
+
+          status: "pending",
+          participants: [],
+          submissions: [],
+          winnerEmail: null,
+          winnerName: null,
+
+          createdAt: new Date(),
+        };
+
+        const result = await contestsCollection.insertOne(newContest);
+        res.send(result);
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Failed to create contest" });
+      }
+    });
+
 
 
 
