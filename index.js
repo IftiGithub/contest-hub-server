@@ -194,6 +194,21 @@ async function run() {
       }
     });
 
+    // GET contests by creator
+    app.get("/contests/creator/:email", async (req, res) => {
+      const email = req.params.email;
+
+      try {
+        const contests = await contestsCollection
+          .find({ creatorEmail: email })
+          .sort({ createdAt: -1 })
+          .toArray();
+
+        res.send(contests);
+      } catch (error) {
+        res.status(500).send({ message: "Failed to fetch creator contests" });
+      }
+    });
 
 
 
