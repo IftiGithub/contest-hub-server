@@ -166,6 +166,19 @@ async function run() {
         res.status(500).send({ message: "Failed to create contest" });
       }
     });
+    // ===== GET ALL APPROVED CONTESTS =====
+    app.get("/contests", async (req, res) => {
+      try {
+        const contests = await contestsCollection
+          .find({ status: "approved" })
+          .sort({ createdAt: -1 })
+          .toArray();
+
+        res.send(contests);
+      } catch (error) {
+        res.status(500).send({ message: "Failed to fetch contests" });
+      }
+    });
 
 
 
