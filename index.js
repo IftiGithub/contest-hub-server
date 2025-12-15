@@ -166,7 +166,7 @@ async function run() {
         res.status(500).send({ message: "Failed to create contest" });
       }
     });
-    // ===== GET ALL APPROVED CONTESTS =====
+    //Get approved contests
     app.get("/contests", async (req, res) => {
       try {
         const contests = await contestsCollection
@@ -179,6 +179,38 @@ async function run() {
         res.status(500).send({ message: "Failed to fetch contests" });
       }
     });
+    //POPULAR CONTESTS (SORT BY PARTICIPANTS)
+    app.get("/contests/popular", async (req, res) => {
+      try {
+        const contests = await contestsCollection
+          .find({ status: "approved" })
+          .sort({ participants: -1 })
+          .limit(5)
+          .toArray();
+
+        res.send(contests);
+      } catch (error) {
+        res.status(500).send({ message: "Failed to fetch popular contests" });
+      }
+    });
+
+    // ===== SEARCH CONTESTS BY TYPE (HOME SEARCH BAR) =====
+    app.get("/contests/search", async (req, res) => {
+      try {
+        const { type } = req.query;
+
+        const contests = await contestsCollection.find({
+          status: "approved",
+          contestType: { $regex: type, $options: "i" },
+        }).toArray();
+
+        res.send(contests);
+      } catch (error) {
+        res.status(500).send({ message: "Search failed" });
+      }
+    });
+
+
 
     // ===== GET CONTEST BY ID =====
     app.get("/contests/:id", async (req, res) => {
@@ -241,11 +273,10 @@ async function run() {
       }
     });
 
-    
+
     //Delete contest by admin
     app.delete("/admin/contests/:id", async (req, res) => {
       const { id } = req.params;
-
       try {
         const result = await contestsCollection.deleteOne({
           _id: new ObjectId(id),
@@ -256,13 +287,6 @@ async function run() {
         res.status(500).send({ message: "Failed to delete contest" });
       }
     });
-
-
-
-
-
-
-
   } finally {
     // keep connection alive
   }
