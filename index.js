@@ -51,7 +51,7 @@ async function run() {
         name: user.name,
         email: user.email,
         photoURL: user.photoURL,
-        role: "user", // default role
+        role: "admin", // default role
         createdAt: new Date(),
       };
 
@@ -209,6 +209,21 @@ async function run() {
         res.status(500).send({ message: "Failed to fetch creator contests" });
       }
     });
+
+    
+    //Get all contests (Admin)
+    app.get("/admin/contests", async (req, res) => {
+      try {
+        const contests = await contestsCollection
+          .find()
+          .sort({ createdAt: -1 })
+          .toArray();
+        res.send(contests);
+      } catch (error) {
+        res.status(500).send({ message: "Failed to fetch contests" });
+      }
+    });
+
 
 
 
