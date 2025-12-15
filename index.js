@@ -180,6 +180,19 @@ async function run() {
       }
     });
 
+    // ===== GET CONTEST BY ID =====
+    app.get("/contests/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const contest = await contestsCollection.findOne({
+          _id: new ObjectId(id),
+        });
+
+        res.send(contest);
+      } catch (error) {
+        res.status(500).send({ message: "Failed to fetch contest" });
+      }
+    });
 
 
 
