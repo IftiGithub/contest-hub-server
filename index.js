@@ -210,7 +210,7 @@ async function run() {
       }
     });
 
-    
+
     //Get all contests (Admin)
     app.get("/admin/contests", async (req, res) => {
       try {
@@ -223,6 +223,28 @@ async function run() {
         res.status(500).send({ message: "Failed to fetch contests" });
       }
     });
+
+    //Update contest status (Approve / Reject)
+    app.patch("/admin/contests/:id", async (req, res) => {
+      const { id } = req.params;
+      const { status } = req.body;
+
+      try {
+        const result = await contestsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { status } }
+        );
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: "Failed to update contest status" });
+      }
+    });
+
+
+
+
+
 
 
 
