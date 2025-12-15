@@ -241,8 +241,21 @@ async function run() {
       }
     });
 
+    
+    //Delete contest by admin
+    app.delete("/admin/contests/:id", async (req, res) => {
+      const { id } = req.params;
 
+      try {
+        const result = await contestsCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
 
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: "Failed to delete contest" });
+      }
+    });
 
 
 
