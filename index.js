@@ -319,6 +319,32 @@ async function run() {
         res.status(500).send({ message: "Failed to delete contest" });
       }
     });
+    // ===== GET ALL USERS (ADMIN) =====
+    app.get("/admin/users", async (req, res) => {
+      try {
+        const users = await usersCollection.find().toArray();
+        res.send(users);
+      } catch (error) {
+        res.status(500).send({ message: "Failed to fetch users" });
+      }
+    });
+    // ===== UPDATE USER ROLE (ADMIN) =====
+    app.patch("/admin/users/role/:id", async (req, res) => {
+      const { id } = req.params;
+      const { role } = req.body;
+
+      try {
+        const result = await usersCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { role } }
+        );
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: "Failed to update role" });
+      }
+    });
+
   } finally {
     // keep connection alive
   }
