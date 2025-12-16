@@ -225,6 +225,38 @@ async function run() {
         res.status(500).send({ message: "Failed to fetch contest" });
       }
     });
+    // ===== REGISTER USER TO CONTEST =====
+    app.patch("/contests/register/:id", async (req, res) => {
+      const { id } = req.params;
+      const { email } = req.body;
+
+      try {
+        const contest = await contestsCollection.findOne({
+          _id: new ObjectId(id),
+        });
+
+        if (!contest) {
+          return res.status(404).send({ message: "Contest not found" });
+        }
+
+        // Prevent duplicate registration
+        if (contest.participants.includes(email)) {
+          return res.status(400).send({ message: "Already registered" });
+        }
+
+        // Add participant
+        const result = await contestsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $push: { participants: email } }
+        );
+
+        res.send(result);
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Registration failed" });
+      }
+    });
+
 
     // GET contests by creator
     app.get("/contests/creator/:email", async (req, res) => {
