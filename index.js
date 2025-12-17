@@ -278,6 +278,34 @@ async function run() {
         res.status(500).json({ message: "Failed to update contest" });
       }
     });
+    // ===== CREATOR DELETE CONTEST (only pending & own) =====
+    app.delete("/contests/:id", verifyToken, verifyCreator, async (req, res) => {
+      const { id } = req.params;
+
+      try {
+        const contest = await contestsCollection.findOne({ _id: new ObjectId(id) });
+
+        if (!contest) {
+          return res.status(404).json({ message: "Contest not found" });
+        }
+
+        // 🔐 Ownership check
+        if (contest.creatorEmail !== req.user.email) {
+          return res.status(403).json({ message: "Not your contest" });
+        }
+
+        // 🔐 Only pending contests can be deleted
+        if (contest.status !== "pending") {
+          return res.status(400).json({ message: "Only pending contests can be deleted" });
+        }
+
+        const result = await contestsCollection.deleteOne({ _id: new ObjectId(id) });
+        res.send(result);
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Failed to delete contest" });
+      }
+    });
 
 
     // ===== ADMIN ROUTES (protected + admin role) =====
