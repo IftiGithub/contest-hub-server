@@ -168,19 +168,21 @@ async function run() {
     // ===== CREATE CONTEST (protected) =====
     app.post("/contests", verifyToken, verifyCreator, async (req, res) => {
       try {
-        const contest = req.body;
+        const { title, image, description, taskInstruction, contestType, price, prizeMoney, deadline } = req.body;
+
+        if (!title || !deadline) return res.status(400).json({ message: "Title and deadline are required" });
 
         const newContest = {
-          title: contest.title,
-          image: contest.image,
-          description: contest.description,
-          taskInstruction: contest.taskInstruction,
-          contestType: contest.contestType,
-          price: contest.price,
-          prizeMoney: contest.prizeMoney,
-          deadline: new Date(contest.deadline),
-          creatorEmail: contest.creatorEmail,
-          creatorName: contest.creatorName,
+          title,
+          image,
+          description,
+          taskInstruction,
+          contestType,
+          price,
+          prizeMoney,
+          deadline: new Date(deadline),
+          creatorEmail: req.user.email,       // always from JWT
+          creatorName: req.user.name || "Unknown", // fallback
           status: "pending",
           participants: [],
           submissions: [],
@@ -192,8 +194,8 @@ async function run() {
         const result = await contestsCollection.insertOne(newContest);
         res.send(result);
       } catch (error) {
-        console.error(error);
-        res.status(500).send({ message: "Failed to create contest" });
+        console.error("Error creating contest:", error);
+        res.status(500).json({ message: "Failed to create contest" });
       }
     });
 
@@ -321,13 +323,23 @@ async function run() {
     app.patch("/admin/contests/:id", verifyToken, verifyAdmin, async (req, res) => {
       const { id } = req.params;
       const { status } = req.body;
+
+      if (!status) {
+        return res.status(400).send({ message: "Status is required" });
+      }
+
       try {
-        const result = await contestsCollection.updateOne({ _id: new ObjectId(id) }, { $set: { status } });
+        const result = await contestsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { status } }
+        );
         res.send(result);
       } catch (error) {
+        console.error(error);
         res.status(500).send({ message: "Failed to update contest status" });
       }
     });
+
 
     app.delete("/admin/contests/:id", verifyToken, verifyAdmin, async (req, res) => {
       const { id } = req.params;
