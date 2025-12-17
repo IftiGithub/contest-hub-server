@@ -47,6 +47,18 @@ const verifyAdmin = async (req, res, next) => {
   }
   next();
 };
+//===== Creator Role Middleware =====
+const verifyCreator = async (req, res, next) => {
+  const email = req.user.email;
+  const user = await usersCollection.findOne({ email });
+
+  if (!user || user.role !== "creator") {
+    return res.status(403).json({ message: "Creator access required" });
+  }
+
+  next();
+};
+
 
 // ===== MONGODB =====
 const uri = `mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@artify.ndgtchi.mongodb.net/?retryWrites=true&w=majority&appName=Artify`;
@@ -154,7 +166,7 @@ async function run() {
     });
 
     // ===== CREATE CONTEST (protected) =====
-    app.post("/contests", verifyToken, async (req, res) => {
+    app.post("/contests", verifyToken,verifyCreator, async (req, res) => {
       try {
         const contest = req.body;
 
@@ -211,7 +223,7 @@ async function run() {
     });
 
     // ===== GET CONTESTS BY CREATOR (protected) =====
-    app.get("/contests/creator/:email", verifyToken, async (req, res) => {
+    app.get("/contests/creator/:email", verifyToken,verifyCreator, async (req, res) => {
       const email = req.params.email;
       try {
         const contests = await contestsCollection.find({ creatorEmail: email }).sort({ createdAt: -1 }).toArray();
