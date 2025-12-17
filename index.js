@@ -166,7 +166,7 @@ async function run() {
     });
 
     // ===== CREATE CONTEST (protected) =====
-    app.post("/contests", verifyToken,verifyCreator, async (req, res) => {
+    app.post("/contests", verifyToken, verifyCreator, async (req, res) => {
       try {
         const contest = req.body;
 
@@ -223,7 +223,7 @@ async function run() {
     });
 
     // ===== GET CONTESTS BY CREATOR (protected) =====
-    app.get("/contests/creator/:email", verifyToken,verifyCreator, async (req, res) => {
+    app.get("/contests/creator/:email", verifyToken, verifyCreator, async (req, res) => {
       const email = req.params.email;
       try {
         const contests = await contestsCollection.find({ creatorEmail: email }).sort({ createdAt: -1 }).toArray();
@@ -233,6 +233,52 @@ async function run() {
         res.status(500).send({ message: "Failed to fetch creator contests" });
       }
     });
+    // ===== CREATOR EDIT CONTEST (only pending & own) =====
+    app.patch("/contests/:id", verifyToken, verifyCreator, async (req, res) => {
+      const { id } = req.params;
+      const updatedData = req.body;
+
+      try {
+        const contest = await contestsCollection.findOne({ _id: new ObjectId(id) });
+
+        if (!contest) {
+          return res.status(404).json({ message: "Contest not found" });
+        }
+
+        // 🔐 Ownership check
+        if (contest.creatorEmail !== req.user.email) {
+          return res.status(403).json({ message: "Not your contest" });
+        }
+
+        // 🔐 Only pending contests can be edited
+        if (contest.status !== "pending") {
+          return res.status(400).json({ message: "Only pending contests can be edited" });
+        }
+
+        const result = await contestsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              title: updatedData.title,
+              image: updatedData.image,
+              description: updatedData.description,
+              taskInstruction: updatedData.taskInstruction,
+              contestType: updatedData.contestType,
+              price: updatedData.price,
+              prizeMoney: updatedData.prizeMoney,
+              deadline: new Date(updatedData.deadline),
+              updatedAt: new Date(),
+            },
+          }
+        );
+
+        res.send(result);
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Failed to update contest" });
+      }
+    });
+
 
     // ===== ADMIN ROUTES (protected + admin role) =====
     app.get("/admin/contests", verifyToken, verifyAdmin, async (req, res) => {
