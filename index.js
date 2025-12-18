@@ -7,6 +7,8 @@ require("dotenv").config();
 const app = express();
 const port = process.env.PORT || 3000;
 
+const stripe = require('stripe')(process.env.STRIPE_SECRET);
+
 // Initialize Firebase Admin
 const serviceAccount = require("./contest-hub-485e5-firebase-adminsdk.json");
 
@@ -81,6 +83,98 @@ async function run() {
 
     usersCollection = client.db("ContestHub-db").collection("Users");
     contestsCollection = client.db("ContestHub-db").collection("Contests");
+
+    //===== Payment related apis=====
+
+    // ===== STRIPE: CREATE CHECKOUT SESSION (protected) =====
+    app.post("/create-checkout-session", verifyToken, async (req, res) => {
+      const { contestId } = req.body;
+
+      try {
+        const contest = await contestsCollection.findOne({ _id: new ObjectId(contestId) });
+
+        if (!contest) {
+          return res.status(404).json({ message: "Contest not found" });
+        }
+
+        // Prevent creator from joining
+        if (contest.creatorEmail === req.user.email) {
+          return res.status(400).json({ message: "Creator cannot join own contest" });
+        }
+
+        // Prevent duplicate registration
+        if (contest.participants.includes(req.user.email)) {
+          return res.status(400).json({ message: "Already registered" });
+        }
+
+        // Stripe Checkout Session
+        const session = await stripe.checkout.sessions.create({
+          payment_method_types: ["card"],
+          mode: "payment",
+          line_items: [
+            {
+              price_data: {
+                currency: "usd",
+                product_data: {
+                  name: contest.title,
+                  description: contest.contestType,
+                },
+                unit_amount: contest.price * 100, // cents
+              },
+              quantity: 1,
+            },
+          ],
+          metadata: {
+            contestId: contestId,
+            userEmail: req.user.email,
+          },
+          success_url: `${process.env.CLIENT_URL}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${process.env.CLIENT_URL}/contest/${contestId}`,
+        });
+
+        res.json({ url: session.url });
+
+      } catch (error) {
+        console.error("Stripe error:", error);
+        res.status(500).json({ message: "Payment session failed" });
+      }
+    });
+    // ===== STRIPE PAYMENT SUCCESS VERIFY =====
+    app.post("/payment-success", verifyToken, async (req, res) => {
+      const { sessionId } = req.body;
+
+      try {
+        const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+        if (session.payment_status !== "paid") {
+          return res.status(400).json({ message: "Payment not completed" });
+        }
+
+        const { contestId, userEmail } = session.metadata;
+
+        const contest = await contestsCollection.findOne({ _id: new ObjectId(contestId) });
+
+        if (!contest) {
+          return res.status(404).json({ message: "Contest not found" });
+        }
+
+        if (contest.participants.includes(userEmail)) {
+          return res.json({ message: "Already registered" });
+        }
+
+        await contestsCollection.updateOne(
+          { _id: new ObjectId(contestId) },
+          { $push: { participants: userEmail } }
+        );
+
+        res.json({ message: "Registration successful" });
+
+      } catch (error) {
+        console.error("Payment verification failed:", error);
+        res.status(500).json({ message: "Payment verification failed" });
+      }
+    });
+
 
     // ===== CREATE USER (open) =====
     app.post("/users", async (req, res) => {
