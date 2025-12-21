@@ -98,6 +98,7 @@ async function run() {
         submissions: [],
         winnerEmail: null,
         winnerName: null,
+        winnerImage: null,
         createdAt: new Date(),
       };
       const result = await contestsCollection.insertOne(newContest);
@@ -168,15 +169,33 @@ async function run() {
       const participantEmails = contest.participants.map(p => (typeof p === "string" ? p : p.email));
       if (!participantEmails.includes(winnerEmail))
         return res.status(400).json({ message: "Winner must be a participant" });
+      const winnerUser = await usersCollection.findOne({ email: winnerEmail });
 
-      const winnerName = contest.submissions.find(s => s.email === winnerEmail)?.name || "Unknown";
+      const winnerName =
+        winnerUser?.name ||
+        contest.submissions.find(s => s.email === winnerEmail)?.name ||
+        "Unknown";
 
-      const result = await contestsCollection.updateOne(
+      const winnerImage =
+        winnerUser?.photoURL ||
+        contest.submissions.find(s => s.email === winnerEmail)?.image ||
+        null;
+
+
+      await contestsCollection.updateOne(
         { _id: new ObjectId(contestId) },
-        { $set: { winnerEmail, winnerName, updatedAt: new Date() } }
+        {
+          $set: {
+            winnerEmail,
+            winnerName,
+            winnerImage,
+            updatedAt: new Date(),
+          },
+        }
       );
 
-      res.json({ success: true, message: "Winner declared successfully", winnerEmail, winnerName });
+
+      res.json({ success: true, message: "Winner declared successfully", winnerEmail, winnerName, winnerImage });
     });
 
 
@@ -202,7 +221,6 @@ async function run() {
 
       const contestId = req.params.id;
       const userEmail = req.user.email;
-
       const contest = await contestsCollection.findOne({ _id: new ObjectId(contestId) });
       if (!contest) return res.status(404).json({ message: "Contest not found" });
 
@@ -221,6 +239,7 @@ async function run() {
       const submission = {
         email: userEmail,
         name: req.user.name || "Unknown",
+        image: req.user.photoURL,
         taskLink,
         submittedAt: new Date(),
       };
