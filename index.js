@@ -150,6 +150,35 @@ async function run() {
       const result = await contestsCollection.deleteOne({ _id: new ObjectId(req.params.id) });
       res.send(result);
     });
+    // ===== DECLARE WINNER =====
+    app.patch("/contests/declare-winner/:id", verifyToken, verifyCreator, async (req, res) => {
+      const contestId = req.params.id;
+      const { winnerEmail } = req.body;
+
+      if (!winnerEmail) return res.status(400).json({ message: "Winner email is required" });
+
+      const contest = await contestsCollection.findOne({ _id: new ObjectId(contestId) });
+      if (!contest) return res.status(404).json({ message: "Contest not found" });
+
+      // Only contest creator can declare winner
+      if (contest.creatorEmail !== req.user.email)
+        return res.status(403).json({ message: "Only the contest creator can declare winner" });
+
+      // Check if winner is a participant
+      const participantEmails = contest.participants.map(p => (typeof p === "string" ? p : p.email));
+      if (!participantEmails.includes(winnerEmail))
+        return res.status(400).json({ message: "Winner must be a participant" });
+
+      const winnerName = contest.submissions.find(s => s.email === winnerEmail)?.name || "Unknown";
+
+      const result = await contestsCollection.updateOne(
+        { _id: new ObjectId(contestId) },
+        { $set: { winnerEmail, winnerName, updatedAt: new Date() } }
+      );
+
+      res.json({ success: true, message: "Winner declared successfully", winnerEmail, winnerName });
+    });
+
 
     // ===== REGISTER TO CONTEST =====
     app.patch("/contests/register/:id", verifyToken, async (req, res) => {
@@ -165,6 +194,52 @@ async function run() {
         { $push: { participants: { email: req.user.email } } }
       );
       res.send({ message: "Registration successful" });
+    });
+    // ===== SUBMIT TASK =====
+    app.post("/contests/:id/submit-task", verifyToken, async (req, res) => {
+      const { taskLink } = req.body; // the user provides a link or description
+      if (!taskLink) return res.status(400).json({ message: "Task link is required" });
+
+      const contestId = req.params.id;
+      const userEmail = req.user.email;
+
+      const contest = await contestsCollection.findOne({ _id: new ObjectId(contestId) });
+      if (!contest) return res.status(404).json({ message: "Contest not found" });
+
+      // Check if user is registered for this contest
+      const participant = contest.participants.find(
+        (p) => (typeof p === "string" ? p === userEmail : p.email === userEmail)
+      );
+
+      if (!participant) return res.status(403).json({ message: "You are not registered for this contest" });
+
+      // Check if user already submitted
+      const alreadySubmitted = contest.submissions.find((s) => s.email === userEmail);
+      if (alreadySubmitted) return res.status(400).json({ message: "You have already submitted your task" });
+
+      // Add submission
+      const submission = {
+        email: userEmail,
+        name: req.user.name || "Unknown",
+        taskLink,
+        submittedAt: new Date(),
+      };
+
+      await contestsCollection.updateOne(
+        { _id: new ObjectId(contestId) },
+        { $push: { submissions: submission } }
+      );
+
+      res.json({ message: "Task submitted successfully", submission });
+    });
+    // ===== GET SUBMISSIONS FOR A CONTEST =====
+    app.get("/contests/submissions/:id", verifyToken, verifyCreator, async (req, res) => {
+      const contestId = req.params.id;
+
+      const contest = await contestsCollection.findOne({ _id: new ObjectId(contestId) });
+      if (!contest) return res.status(404).json({ message: "Contest not found" });
+
+      res.json(contest.submissions || []);
     });
 
     // ===== PARTICIPATED CONTESTS =====
