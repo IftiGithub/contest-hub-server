@@ -3,36 +3,28 @@ const express = require("express");
 const cors = require("cors");
 const admin = require("firebase-admin");
 require("dotenv").config();
+const stripe = require("stripe")(process.env.STRIPE_SECRET);
 
 const app = express();
 const port = process.env.PORT || 3000;
 
-const stripe = require('stripe')(process.env.STRIPE_SECRET);
-
-// Initialize Firebase Admin
+// ===== FIREBASE ADMIN =====
 const serviceAccount = require("./contest-hub-485e5-firebase-adminsdk.json");
-
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
+  credential: admin.credential.cert(serviceAccount),
 });
 
 // ===== MIDDLEWARE =====
 app.use(cors());
 app.use(express.json());
 
-// ===== JWT Verification Middleware =====
+// ===== JWT VERIFICATION =====
 const verifyToken = async (req, res, next) => {
   const authHeader = req.headers.authorization;
-
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).json({ message: "Unauthorized" });
-  }
-
+  if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ message: "Unauthorized" });
   const token = authHeader.split(" ")[1];
-
   try {
-    const decodedToken = await admin.auth().verifyIdToken(token);
-    req.user = decodedToken; // attach user info to request
+    req.user = await admin.auth().verifyIdToken(token);
     next();
   } catch (error) {
     console.error("Token verification failed:", error);
@@ -40,440 +32,85 @@ const verifyToken = async (req, res, next) => {
   }
 };
 
-// ===== Admin Role Middleware =====
+// ===== ROLE MIDDLEWARE =====
+let usersCollection, contestsCollection, paymentsCollection;
+
 const verifyAdmin = async (req, res, next) => {
-  const email = req.user.email;
-  const user = await usersCollection.findOne({ email });
-  if (!user || user.role !== "admin") {
-    return res.status(403).json({ message: "Admin access required" });
-  }
+  const user = await usersCollection.findOne({ email: req.user.email });
+  if (!user || user.role !== "admin") return res.status(403).json({ message: "Admin access required" });
   next();
 };
-//===== Creator Role Middleware =====
+
 const verifyCreator = async (req, res, next) => {
-  const email = req.user.email;
-  const user = await usersCollection.findOne({ email });
-
-  if (!user || user.role !== "creator") {
-    return res.status(403).json({ message: "Creator access required" });
-  }
-
+  const user = await usersCollection.findOne({ email: req.user.email });
+  if (!user || user.role !== "creator") return res.status(403).json({ message: "Creator access required" });
   next();
 };
-
 
 // ===== MONGODB =====
 const uri = `mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@artify.ndgtchi.mongodb.net/?retryWrites=true&w=majority&appName=Artify`;
-
 const client = new MongoClient(uri, {
-  serverApi: {
-    version: ServerApiVersion.v1,
-    strict: true,
-    deprecationErrors: true,
-  },
+  serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true },
 });
-
-let usersCollection;
-let contestsCollection;
 
 async function run() {
   try {
     await client.connect();
-    console.log("MongoDB connected successfully");
+    console.log("MongoDB connected");
 
     usersCollection = client.db("ContestHub-db").collection("Users");
     contestsCollection = client.db("ContestHub-db").collection("Contests");
+    paymentsCollection = client.db("ContestHub-db").collection("Payments");
 
-    //===== Payment related apis=====
-
-    // ===== STRIPE: CREATE CHECKOUT SESSION (protected) =====
-    app.post("/create-checkout-session", verifyToken, async (req, res) => {
-      const { contestId } = req.body;
-
-      try {
-        const contest = await contestsCollection.findOne({ _id: new ObjectId(contestId) });
-
-        if (!contest) {
-          return res.status(404).json({ message: "Contest not found" });
-        }
-
-        // Prevent creator from joining
-        if (contest.creatorEmail === req.user.email) {
-          return res.status(400).json({ message: "Creator cannot join own contest" });
-        }
-
-        // Prevent duplicate registration
-        if (contest.participants.includes(req.user.email)) {
-          return res.status(400).json({ message: "Already registered" });
-        }
-
-        // Stripe Checkout Session
-        const session = await stripe.checkout.sessions.create({
-          payment_method_types: ["card"],
-          mode: "payment",
-          line_items: [
-            {
-              price_data: {
-                currency: "usd",
-                product_data: {
-                  name: contest.title,
-                  description: contest.contestType,
-                },
-                unit_amount: contest.price * 100, // cents
-              },
-              quantity: 1,
-            },
-          ],
-          metadata: {
-            contestId: contestId,
-            userEmail: req.user.email,
-          },
-          success_url: `${process.env.CLIENT_URL}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-          cancel_url: `${process.env.CLIENT_URL}/contest/${contestId}`,
-        });
-
-        res.json({ url: session.url });
-
-      } catch (error) {
-        console.error("Stripe error:", error);
-        res.status(500).json({ message: "Payment session failed" });
-      }
-    });
-    // ===== STRIPE PAYMENT SUCCESS VERIFY =====
-    app.post("/payment-success", verifyToken, async (req, res) => {
-      const { sessionId } = req.body;
-
-      try {
-        const session = await stripe.checkout.sessions.retrieve(sessionId);
-
-        if (session.payment_status !== "paid") {
-          return res.status(400).json({ message: "Payment not completed" });
-        }
-
-        const { contestId, userEmail } = session.metadata;
-
-        const contest = await contestsCollection.findOne({ _id: new ObjectId(contestId) });
-
-        if (!contest) {
-          return res.status(404).json({ message: "Contest not found" });
-        }
-
-        if (contest.participants.includes(userEmail)) {
-          return res.json({ message: "Already registered" });
-        }
-
-        await contestsCollection.updateOne(
-          { _id: new ObjectId(contestId) },
-          { $push: { participants: userEmail } }
-        );
-
-        res.json({ message: "Registration successful" });
-
-      } catch (error) {
-        console.error("Payment verification failed:", error);
-        res.status(500).json({ message: "Payment verification failed" });
-      }
-    });
-
-
-    // ===== CREATE USER (open) =====
+    // ===== USERS =====
     app.post("/users", async (req, res) => {
-      const user = req.body;
-
-      const existingUser = await usersCollection.findOne({
-        email: user.email,
-      });
-
-      if (existingUser) {
-        return res.send({ message: "User already exists" });
-      }
-
-      const newUser = {
-        name: user.name,
-        email: user.email,
-        photoURL: user.photoURL,
-        role: "user", // default role
-        createdAt: new Date(),
-      };
-
+      const { email } = req.body;
+      if (await usersCollection.findOne({ email })) return res.send({ message: "User already exists" });
+      const newUser = { ...req.body, role: "user", createdAt: new Date() };
       const result = await usersCollection.insertOne(newUser);
       res.send(result);
     });
 
-    // ===== GET USER BY EMAIL (open) =====
     app.get("/users/:email", async (req, res) => {
-      const email = req.params.email;
-      const user = await usersCollection.findOne({ email });
-
-      if (!user) {
-        return res.status(404).json({ message: "User not found" });
-      }
-
+      const user = await usersCollection.findOne({ email: req.params.email });
+      if (!user) return res.status(404).json({ message: "User not found" });
       res.json(user);
     });
 
-    // ===== UPDATE USER PROFILE (protected) =====
     app.put("/users/:email", verifyToken, async (req, res) => {
-      const email = req.params.email;
-
-      if (req.user.email !== email) {
-        return res.status(403).json({ message: "Cannot update other user's profile" });
-      }
-
-      const updatedData = req.body;
-      const filter = { email };
-      const updateDoc = {
-        $set: {
-          name: updatedData.name,
-          photoURL: updatedData.photoURL,
-          bio: updatedData.bio || "",
-          updatedAt: new Date(),
-        },
-      };
-
-      const result = await usersCollection.updateOne(filter, updateDoc);
+      if (req.user.email !== req.params.email) return res.status(403).json({ message: "Cannot update other user's profile" });
+      const updateDoc = { $set: { ...req.body, updatedAt: new Date() } };
+      const result = await usersCollection.updateOne({ email: req.params.email }, updateDoc);
       res.send(result);
     });
 
-    // ===== PARTICIPATED CONTESTS (protected) =====
-    app.get("/participated-contests/:email", verifyToken, async (req, res) => {
-      const email = req.params.email;
-      try {
-        const contests = await contestsCollection.find({ participants: email }).toArray();
-        res.send(contests);
-      } catch (error) {
-        console.error(error);
-        res.status(500).send({ message: "Failed to fetch participated contests" });
-      }
-    });
-
-    // ===== WINNING CONTESTS (protected) =====
-    app.get("/winning-contests/:email", verifyToken, async (req, res) => {
-      const email = req.params.email;
-      try {
-        const contests = await contestsCollection.find({ winnerEmail: email }).toArray();
-        res.send(contests);
-      } catch (error) {
-        console.error(error);
-        res.status(500).send({ message: "Failed to fetch winning contests" });
-      }
-    });
-
-    // ===== CREATE CONTEST (protected) =====
+    // ===== CONTESTS =====
     app.post("/contests", verifyToken, verifyCreator, async (req, res) => {
-      try {
-        const { title, image, description, taskInstruction, contestType, price, prizeMoney, deadline } = req.body;
+      const { title, deadline } = req.body;
+      if (!title || !deadline) return res.status(400).json({ message: "Title and deadline are required" });
 
-        if (!title || !deadline) return res.status(400).json({ message: "Title and deadline are required" });
-
-        const newContest = {
-          title,
-          image,
-          description,
-          taskInstruction,
-          contestType,
-          price,
-          prizeMoney,
-          deadline: new Date(deadline),
-          creatorEmail: req.user.email,       // always from JWT
-          creatorName: req.user.name || "Unknown", // fallback
-          status: "pending",
-          participants: [],
-          submissions: [],
-          winnerEmail: null,
-          winnerName: null,
-          createdAt: new Date(),
-        };
-
-        const result = await contestsCollection.insertOne(newContest);
-        res.send(result);
-      } catch (error) {
-        console.error("Error creating contest:", error);
-        res.status(500).json({ message: "Failed to create contest" });
-      }
+      const newContest = {
+        ...req.body,
+        creatorEmail: req.user.email,
+        creatorName: req.user.name || "Unknown",
+        status: "pending",
+        participants: [],
+        submissions: [],
+        winnerEmail: null,
+        winnerName: null,
+        createdAt: new Date(),
+      };
+      const result = await contestsCollection.insertOne(newContest);
+      res.send(result);
     });
 
-    // ===== REGISTER USER TO CONTEST (protected) =====
-    app.patch("/contests/register/:id", verifyToken, async (req, res) => {
-      const { id } = req.params;
-      const { email } = req.body;
-
-      try {
-        const contest = await contestsCollection.findOne({ _id: new ObjectId(id) });
-        if (!contest) return res.status(404).send({ message: "Contest not found" });
-
-        if (contest.participants.includes(email)) {
-          return res.status(400).send({ message: "Already registered" });
-        }
-
-        const result = await contestsCollection.updateOne(
-          { _id: new ObjectId(id) },
-          { $push: { participants: email } }
-        );
-
-        res.send(result);
-      } catch (error) {
-        console.error(error);
-        res.status(500).send({ message: "Registration failed" });
-      }
-    });
-
-    // ===== GET CONTESTS BY CREATOR (protected) =====
-    app.get("/contests/creator/:email", verifyToken, verifyCreator, async (req, res) => {
-      const email = req.params.email;
-      try {
-        const contests = await contestsCollection.find({ creatorEmail: email }).sort({ createdAt: -1 }).toArray();
-        res.send(contests);
-      } catch (error) {
-        console.error(error);
-        res.status(500).send({ message: "Failed to fetch creator contests" });
-      }
-    });
-    // ===== CREATOR EDIT CONTEST (only pending & own) =====
-    app.patch("/contests/:id", verifyToken, verifyCreator, async (req, res) => {
-      const { id } = req.params;
-      const updatedData = req.body;
-
-      try {
-        const contest = await contestsCollection.findOne({ _id: new ObjectId(id) });
-
-        if (!contest) {
-          return res.status(404).json({ message: "Contest not found" });
-        }
-
-        // 🔐 Ownership check
-        if (contest.creatorEmail !== req.user.email) {
-          return res.status(403).json({ message: "Not your contest" });
-        }
-
-        // 🔐 Only pending contests can be edited
-        if (contest.status !== "pending") {
-          return res.status(400).json({ message: "Only pending contests can be edited" });
-        }
-
-        const result = await contestsCollection.updateOne(
-          { _id: new ObjectId(id) },
-          {
-            $set: {
-              title: updatedData.title,
-              image: updatedData.image,
-              description: updatedData.description,
-              taskInstruction: updatedData.taskInstruction,
-              contestType: updatedData.contestType,
-              price: updatedData.price,
-              prizeMoney: updatedData.prizeMoney,
-              deadline: new Date(updatedData.deadline),
-              updatedAt: new Date(),
-            },
-          }
-        );
-
-        res.send(result);
-      } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: "Failed to update contest" });
-      }
-    });
-    // ===== CREATOR DELETE CONTEST (only pending & own) =====
-    app.delete("/contests/:id", verifyToken, verifyCreator, async (req, res) => {
-      const { id } = req.params;
-
-      try {
-        const contest = await contestsCollection.findOne({ _id: new ObjectId(id) });
-
-        if (!contest) {
-          return res.status(404).json({ message: "Contest not found" });
-        }
-
-        // 🔐 Ownership check
-        if (contest.creatorEmail !== req.user.email) {
-          return res.status(403).json({ message: "Not your contest" });
-        }
-
-        // 🔐 Only pending contests can be deleted
-        if (contest.status !== "pending") {
-          return res.status(400).json({ message: "Only pending contests can be deleted" });
-        }
-
-        const result = await contestsCollection.deleteOne({ _id: new ObjectId(id) });
-        res.send(result);
-      } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: "Failed to delete contest" });
-      }
-    });
-
-
-    // ===== ADMIN ROUTES (protected + admin role) =====
-    app.get("/admin/contests", verifyToken, verifyAdmin, async (req, res) => {
-      try {
-        const contests = await contestsCollection.find().sort({ createdAt: -1 }).toArray();
-        res.send(contests);
-      } catch (error) {
-        res.status(500).send({ message: "Failed to fetch contests" });
-      }
-    });
-
-    app.patch("/admin/contests/:id", verifyToken, verifyAdmin, async (req, res) => {
-      const { id } = req.params;
-      const { status } = req.body;
-
-      if (!status) {
-        return res.status(400).send({ message: "Status is required" });
-      }
-
-      try {
-        const result = await contestsCollection.updateOne(
-          { _id: new ObjectId(id) },
-          { $set: { status } }
-        );
-        res.send(result);
-      } catch (error) {
-        console.error(error);
-        res.status(500).send({ message: "Failed to update contest status" });
-      }
-    });
-
-
-    app.delete("/admin/contests/:id", verifyToken, verifyAdmin, async (req, res) => {
-      const { id } = req.params;
-      try {
-        const result = await contestsCollection.deleteOne({ _id: new ObjectId(id) });
-        res.send(result);
-      } catch (error) {
-        res.status(500).send({ message: "Failed to delete contest" });
-      }
-    });
-
-    // ===== ADMIN USER MANAGEMENT =====
-    app.get("/admin/users", verifyToken, verifyAdmin, async (req, res) => {
-      try {
-        const users = await usersCollection.find().toArray();
-        res.send(users);
-      } catch (error) {
-        res.status(500).send({ message: "Failed to fetch users" });
-      }
-    });
-
-    app.patch("/admin/users/role/:id", verifyToken, verifyAdmin, async (req, res) => {
-      const { id } = req.params;
-      const { role } = req.body;
-      try {
-        const result = await usersCollection.updateOne({ _id: new ObjectId(id) }, { $set: { role } });
-        res.send(result);
-      } catch (error) {
-        res.status(500).send({ message: "Failed to update role" });
-      }
-    });
-
-    // ===== PUBLIC CONTEST ROUTES =====
     app.get("/contests", async (req, res) => {
       const contests = await contestsCollection.find({ status: "approved" }).sort({ createdAt: -1 }).toArray();
       res.send(contests);
     });
 
     app.get("/contests/popular", async (req, res) => {
-      const contests = await contestsCollection.find({ status: "approved" }).sort({ participants: -1 }).limit(5).toArray();
+      const contests = await contestsCollection.find({ status: "approved" }).sort({ "participants.length": -1 }).limit(5).toArray();
       res.send(contests);
     });
 
@@ -488,17 +125,193 @@ async function run() {
       res.send(contest);
     });
 
+    app.get("/contests/creator/:email", verifyToken, verifyCreator, async (req, res) => {
+      const contests = await contestsCollection.find({ creatorEmail: req.params.email }).sort({ createdAt: -1 }).toArray();
+      res.send(contests);
+    });
+
+    app.patch("/contests/:id", verifyToken, verifyCreator, async (req, res) => {
+      const contest = await contestsCollection.findOne({ _id: new ObjectId(req.params.id) });
+      if (!contest) return res.status(404).json({ message: "Contest not found" });
+      if (contest.creatorEmail !== req.user.email) return res.status(403).json({ message: "Not your contest" });
+      if (contest.status !== "pending") return res.status(400).json({ message: "Only pending contests can be edited" });
+
+      const updateDoc = { $set: { ...req.body, updatedAt: new Date() } };
+      const result = await contestsCollection.updateOne({ _id: new ObjectId(req.params.id) }, updateDoc);
+      res.send(result);
+    });
+
+    app.delete("/contests/:id", verifyToken, verifyCreator, async (req, res) => {
+      const contest = await contestsCollection.findOne({ _id: new ObjectId(req.params.id) });
+      if (!contest) return res.status(404).json({ message: "Contest not found" });
+      if (contest.creatorEmail !== req.user.email) return res.status(403).json({ message: "Not your contest" });
+      if (contest.status !== "pending") return res.status(400).json({ message: "Only pending contests can be deleted" });
+
+      const result = await contestsCollection.deleteOne({ _id: new ObjectId(req.params.id) });
+      res.send(result);
+    });
+
+    // ===== REGISTER TO CONTEST =====
+    app.patch("/contests/register/:id", verifyToken, async (req, res) => {
+      const contest = await contestsCollection.findOne({ _id: new ObjectId(req.params.id) });
+      if (!contest) return res.status(404).json({ message: "Contest not found" });
+
+      const participantEmails = contest.participants.map(p => typeof p === "string" ? p : p.email);
+
+      if (participantEmails.includes(req.user.email)) return res.status(400).json({ message: "Already registered" });
+
+      await contestsCollection.updateOne(
+        { _id: new ObjectId(req.params.id) },
+        { $push: { participants: { email: req.user.email } } }
+      );
+      res.send({ message: "Registration successful" });
+    });
+
+    // ===== PARTICIPATED CONTESTS =====
+    app.get("/participated-contests/:email", verifyToken, async (req, res) => {
+      if (req.user.email !== req.params.email) return res.status(403).json({ message: "Forbidden" });
+
+      const contests = await contestsCollection.find({
+        "participants.email": req.params.email
+      }).toArray();
+
+      res.send(contests);
+    });
+
+    app.get("/winning-contests/:email", verifyToken, async (req, res) => {
+      const contests = await contestsCollection.find({ winnerEmail: req.params.email }).toArray();
+      res.send(contests);
+    });
+
+    // ===== ADMIN =====
+    app.get("/admin/contests", verifyToken, verifyAdmin, async (req, res) => {
+      const contests = await contestsCollection.find().sort({ createdAt: -1 }).toArray();
+      res.send(contests);
+    });
+
+    app.patch("/admin/contests/:id", verifyToken, verifyAdmin, async (req, res) => {
+      const result = await contestsCollection.updateOne({ _id: new ObjectId(req.params.id) }, { $set: { status: req.body.status } });
+      res.send(result);
+    });
+
+    app.delete("/admin/contests/:id", verifyToken, verifyAdmin, async (req, res) => {
+      const result = await contestsCollection.deleteOne({ _id: new ObjectId(req.params.id) });
+      res.send(result);
+    });
+
+    app.get("/admin/users", verifyToken, verifyAdmin, async (req, res) => {
+      const users = await usersCollection.find().toArray();
+      res.send(users);
+    });
+
+    app.patch("/admin/users/role/:id", verifyToken, verifyAdmin, async (req, res) => {
+      const result = await usersCollection.updateOne({ _id: new ObjectId(req.params.id) }, { $set: { role: req.body.role } });
+      res.send(result);
+    });
+
+    // ===== STRIPE CHECKOUT =====
+    app.post("/create-checkout-session", verifyToken, async (req, res) => {
+      const contest = await contestsCollection.findOne({ _id: new ObjectId(req.body.contestId) });
+      if (!contest) return res.status(404).json({ message: "Contest not found" });
+
+      const participantEmails = contest.participants.map(p => typeof p === "string" ? p : p.email);
+      if (participantEmails.includes(req.user.email)) return res.status(400).json({ message: "Already registered" });
+
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ["card"],
+        mode: "payment",
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: { name: contest.title },
+              unit_amount: contest.price * 100,
+            },
+            quantity: 1,
+          },
+        ],
+        metadata: { contestId: contest._id.toString(), userEmail: req.user.email },
+        success_url: `${process.env.CLIENT_URL}/payment-success?session_id={CHECKOUT_SESSION_ID}&contestId=${contest._id}`,
+        cancel_url: `${process.env.CLIENT_URL}/contest/${contest._id}`,
+      });
+
+      // Avoid duplicate payments
+      await paymentsCollection.updateOne(
+        { sessionId: session.id },
+        {
+          $setOnInsert: {
+            userEmail: req.user.email,
+            contestId: contest._id,
+            sessionId: session.id,
+            amount: contest.price,
+            status: "pending",
+            createdAt: new Date(),
+          },
+        },
+        { upsert: true }
+      );
+
+      res.json({ url: session.url });
+    });
+
+    // ===== PAYMENT CONFIRM =====
+    app.post("/payments/confirm", async (req, res) => {
+      const { sessionId } = req.body;
+
+      try {
+        const session = await stripe.checkout.sessions.retrieve(sessionId);
+        if (!session || session.payment_status !== "paid") return res.status(400).json({ message: "Payment not completed" });
+
+        const contestId = session.metadata.contestId;
+        const userEmail = session.metadata.userEmail;
+
+        const contest = await contestsCollection.findOne({ _id: new ObjectId(contestId) });
+        if (!contest) return res.status(404).json({ message: "Contest not found" });
+
+        const participantEmails = contest.participants.map(p => typeof p === "string" ? p : p.email);
+
+        if (!participantEmails.includes(userEmail)) {
+          await contestsCollection.updateOne(
+            { _id: new ObjectId(contestId) },
+            {
+              $push: {
+                participants: {
+                  email: userEmail,
+                  paymentStatus: "paid",
+                  paymentIntentId: session.payment_intent,
+                  paidAt: new Date(),
+                },
+              },
+            }
+          );
+        }
+
+        await paymentsCollection.updateOne(
+          { sessionId },
+          {
+            $set: {
+              status: "paid",
+              paymentIntentId: session.payment_intent,
+              paidAt: new Date(),
+            },
+          }
+        );
+
+        res.json({ success: true, message: "Payment successful! You are registered." });
+      } catch (error) {
+        console.error("Payment verification failed:", error);
+        res.status(500).json({ message: "Payment verification failed" });
+      }
+    });
+
   } finally {
-    // keep connection alive
+    // Keep connection alive
   }
 }
+
 run().catch(console.dir);
 
 // ===== TEST ROUTE =====
-app.get("/", (req, res) => {
-  res.send("ContestHub Server Running");
-});
+app.get("/", (req, res) => res.send("ContestHub Server Running"));
 
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-});
+app.listen(port, () => console.log(`Server running on port ${port}`));
