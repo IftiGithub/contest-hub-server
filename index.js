@@ -114,6 +114,23 @@ async function run() {
       const contests = await contestsCollection.find({ status: "approved" }).sort({ "participants.length": -1 }).limit(5).toArray();
       res.send(contests);
     });
+    // ===== PUBLIC WINNERS (Home Page Advertisement) =====
+    app.get("/contests/winners", async (req, res) => {
+      const winners = await contestsCollection
+        .find({ winnerEmail: { $ne: null } })
+        .sort({ updatedAt: -1 })
+        .limit(6)
+        .project({
+          title: 1,
+          prizeMoney: 1,
+          winnerName: 1,
+          winnerImage: 1,
+          image: 1,
+        })
+        .toArray();
+
+      res.send(winners);
+    });
 
     app.get("/contests/search", async (req, res) => {
       const { type } = req.query;
