@@ -214,6 +214,98 @@ async function run() {
 
       res.json({ success: true, message: "Winner declared successfully", winnerEmail, winnerName, winnerImage });
     });
+    // ===== LEADERBOARD =====
+    // ===== LEADERBOARD =====
+    app.get("/leaderboard", async (req, res) => {
+      try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+
+        // Step 1: Get all contests with winners
+        const contestsWithWinners = await contestsCollection
+          .find({ winnerEmail: { $ne: null } })
+          .project({ winnerEmail: 1 })
+          .toArray();
+
+        // Step 2: Count wins per user
+        const winCountMap = {};
+        contestsWithWinners.forEach(contest => {
+          const winner = contest.winnerEmail;
+          if (winner) winCountMap[winner] = (winCountMap[winner] || 0) + 1;
+        });
+
+        // Step 3: Get all users who have at least 1 win
+        const winnerEmails = Object.keys(winCountMap);
+        const users = await usersCollection
+          .find({ email: { $in: winnerEmails } })
+          .project({ name: 1, email: 1, photoURL: 1 })
+          .toArray();
+
+        // Step 4: Merge win counts into users
+        const leaderboard = users
+          .map(user => ({
+            name: user.name || "Unknown",
+            email: user.email,
+            photoURL: user.photoURL || null,
+            wins: winCountMap[user.email] || 0,
+          }))
+          .sort((a, b) => b.wins - a.wins); // Sort descending
+
+        // Step 5: Pagination
+        const paginatedLeaderboard = leaderboard.slice(skip, skip + limit);
+
+        res.json({
+          page,
+          totalPages: Math.ceil(leaderboard.length / limit),
+          totalUsers: leaderboard.length,
+          data: paginatedLeaderboard,
+        });
+      } catch (error) {
+        console.error("Leaderboard fetch failed:", error);
+        res.status(500).json({ message: "Failed to fetch leaderboard" });
+      }
+    });
+    // ===== TOP CREATORS =====
+    app.get("/top-creators", async (req, res) => {
+      try {
+        // Step 1: Get all contests
+        const allContests = await contestsCollection.find().project({ creatorEmail: 1, creatorName: 1 }).toArray();
+
+        // Step 2: Count contests per creator
+        const creatorCountMap = {};
+        allContests.forEach(contest => {
+          if (!contest.creatorEmail) return;
+          if (!creatorCountMap[contest.creatorEmail]) {
+            creatorCountMap[contest.creatorEmail] = { name: contest.creatorName || "Unknown", email: contest.creatorEmail, count: 1 };
+          } else {
+            creatorCountMap[contest.creatorEmail].count += 1;
+          }
+        });
+
+        // Step 3: Convert to array and sort descending
+        const topCreators = Object.values(creatorCountMap).sort((a, b) => b.count - a.count);
+
+        // Step 4: Optionally include photoURL from Users collection
+        const emails = topCreators.map(c => c.email);
+        const users = await usersCollection.find({ email: { $in: emails } }).project({ email: 1, photoURL: 1 }).toArray();
+        const usersMap = {};
+        users.forEach(u => { usersMap[u.email] = u.photoURL || null });
+
+        const result = topCreators.map(c => ({
+          ...c,
+          photoURL: usersMap[c.email] || null
+        }));
+
+        res.json(result);
+      } catch (error) {
+        console.error("Top creators fetch failed:", error);
+        res.status(500).json({ message: "Failed to fetch top creators" });
+      }
+    });
+
+
+
 
 
     // ===== REGISTER TO CONTEST =====
