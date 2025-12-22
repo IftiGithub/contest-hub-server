@@ -111,9 +111,30 @@ async function run() {
     });
 
     app.get("/contests/popular", async (req, res) => {
-      const contests = await contestsCollection.find({ status: "approved" }).sort({ "participants.length": -1 }).limit(5).toArray();
-      res.send(contests);
+      try {
+        const contests = await contestsCollection.aggregate([
+          {
+            $match: { status: "approved" }
+          },
+          {
+            $addFields: {
+              participantCount: { $size: "$participants" }
+            }
+          },
+          {
+            $sort: { participantCount: -1 }
+          },
+          {
+            $limit: 5
+          }
+        ]).toArray();
+
+        res.send(contests);
+      } catch (error) {
+        res.status(500).send({ message: "Failed to fetch popular contests" });
+      }
     });
+
     // ===== PUBLIC WINNERS (Home Page Advertisement) =====
     app.get("/contests/winners", async (req, res) => {
       const winners = await contestsCollection
