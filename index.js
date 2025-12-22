@@ -303,6 +303,28 @@ async function run() {
         res.status(500).json({ message: "Failed to fetch top creators" });
       }
     });
+    app.get("/upcoming", async (req, res) => {
+      try {
+        const upcomingContests = await contestsCollection
+          .find({ status: "pending" })
+          .sort({ createdAt: -1 })
+          .project({
+            image: 1,
+            title: 1,
+            creatorName: 1,
+            creatorEmail: 1,
+            deadline: 1,
+            prizeMoney: 1,
+          })
+          .toArray();
+
+        res.json(upcomingContests);
+      } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: "Failed to fetch upcoming contests" });
+      }
+    });
+
 
 
 
