@@ -564,4 +564,11 @@ run().catch(console.dir);
 // ===== TEST ROUTE =====
 app.get("/", (req, res) => res.send("ContestHub Server Running"));
 
-app.listen(port, () => console.log(`Server running on port ${port}`));
+// ✅ FOR VERCEL - Export the app
+module.exports = app;
+
+// Keep this for local development only
+if (process.env.NODE_ENV !== 'production') {
+  const port = process.env.PORT || 3000;
+  app.listen(port, () => console.log(`Server running on port ${port}`));
+}
