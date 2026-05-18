@@ -2,10 +2,9 @@
   "name": "contest-hub-server",
   "version": "1.0.0",
   "description": "",
-  "main": "api/index.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node api/index.js",
-    "vercel-build": "echo Hello"
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
@@ -14,8 +13,9 @@
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
-    "firebase-admin": "^13.6.0",
+    "firebase-admin": "^13.8.0",
     "mongodb": "^7.0.0",
+    "node-cron": "^4.2.1",
     "stripe": "^20.1.0"
   }
 }
